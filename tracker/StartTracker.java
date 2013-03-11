@@ -4,44 +4,87 @@ import fiji.tool.SliceListener;
 import fiji.tool.SliceObserver;
 import ij.ImageJ;
 import ij.ImagePlus;
-import ij.gui.OvalRoi;
 import ij.gui.Overlay;
-import ij.process.ImageProcessor;
+import imgLib2Tools.Average;
+import imgLib2Tools.Substack;
 import inputOutput.OpenImages;
 
-import java.awt.Color;
 import java.io.File;
+import java.util.ArrayList;
 
-import mpicbg.imglib.algorithm.peak.GaussianPeakFitterND;
-import mpicbg.imglib.image.Image;
-import mpicbg.imglib.type.numeric.real.FloatType;
-import mpicbg.imglib.util.DevUtil;
-import mpicbg.imglib.util.Util;
+import net.imglib2.RandomAccess;
+import net.imglib2.algorithm.gauss.Gauss;
+import net.imglib2.algorithm.math.PickImagePeaks;
+import net.imglib2.img.ImagePlusAdapter;
+import net.imglib2.img.Img;
+import net.imglib2.img.display.imagej.ImageJFunctions;
+import net.imglib2.type.numeric.real.FloatType;
+import roiTools.DrawOverlay;
 
 public class StartTracker 
 {
-	private ImagePlus imp; 
+	private ImagePlus imp;
+	private ArrayList<Particle> particleList;; 
+	//private ArrayList<double[]> fitParameterList; 
 	
 	public StartTracker( final File file )
 	{
 		setImp( file ); 
-		findParticles( file );
+		setParticleList( findParticles( file ) );
+		//fit(); 
 		
 		// add listener to the imageplus slice slider
-		SliceObserver sliceObserver = new SliceObserver( imp, new ImagePlusListener() );
-
+		//SliceObserver sliceObserver = new SliceObserver( imp, new ImagePlusListener() );
 	}
 	
 	/**
 	 * This method finds the starting point for the tracking. 
 	 * @param image
 	 */
-	public void findParticles( final File file )
+	public ArrayList<Particle> findParticles( final File file )
 	{
+		ArrayList<Particle> particleList = new ArrayList<Particle>(); 
 		//ImagePlus imp = OpenImages.getFloatTypeImp( file ); 
 		getImp().show(); 
+		 
+		Img<FloatType> img = ImagePlusAdapter.wrap( getImp() );  
 		
-		//for( int i = 1; i <= getImp().getStackSize(); i++ )
+		int nrOfDimension = img.numDimensions(); 
+		//Img<FloatType> subStack = Substack.getSubstack(img, ( nrOfDimension -1) , 0, 49 );  
+		Img<net.imglib2.type.numeric.real.FloatType> averageImg = Average.averageOverDimension( img, nrOfDimension );
+		Gauss.inFloatInPlace(1.0, averageImg); 
+		 
+		
+		PickImagePeaks<FloatType> pip = new PickImagePeaks<FloatType>( averageImg ); 
+		pip.process(); 
+		ArrayList<long[]> peakPos = pip.getPeakList(); 
+		
+		
+		getImp().setOverlay( new Overlay() ); 
+		
+		getImp().getOverlay().clear(); 
+		
+		RandomAccess<FloatType> r = averageImg.randomAccess(); 
+		for( long[] pos : peakPos )
+		{
+			r.setPosition( pos ); 
+			if( r.get().get() > 500 )
+			{
+				Point point = new Point( new int[] { (int) pos[ 0 ], (int) pos[ 1 ] }  ); 
+				DrawOverlay.addOval( point, 1, 1 , imp );		
+				particleList.add( new Particle( getImp(), pos ) ); 
+			}
+			
+		}
+		
+
+		/*
+		ImageJFunctions.show( averageImg ); 
+		ImageJFunctions.show( Extrema.findMaxima( averageImg ) ); 
+		
+		
+		
+		
 		
 		ImageProcessor ip = getImp().getImageStack().getProcessor( 1 );
 		float[] pixels = (float[]) ip.getPixels();
@@ -56,8 +99,20 @@ public class StartTracker
 		//GaussianPeakFitterND<FloatType> fit = new GaussianPeakFitterND<FloatType>( imglib1 );
 		//fit.process(point, typical_sigma)
 		
-		// extract peaks to show
+		*/
 		
+		 
+		return particleList; 
+	}
+	
+	public void fit()
+	{
+		//int[] initPos = new int[]{ 45, 28 }; 
+		//Particle p = new Particle( getImp(), initPos);
+		//getParticleList().add( p );
+		for( Particle p : getParticleList() )
+			p.trackOverStack(); 
+		 
 	}
 	
 	protected class ImagePlusListener implements SliceListener
@@ -66,30 +121,33 @@ public class StartTracker
 		public void sliceChanged(ImagePlus arg0)
 		{
 			int slice = getImp().getCurrentSlice();
-			//System.out.println( getImp().getCurrentSlice() );
-			
-			Overlay o = imp.getOverlay();
-			
-			if ( o == null )
+			if( getImp().getOverlay() == null )
 			{
-				o = new Overlay();
-				imp.setOverlay( o );
+				getImp().setOverlay( new Overlay() ); 
 			}
 			
-			o.clear();
+			getImp().getOverlay().clear(); 
 			
-			final OvalRoi or = new OvalRoi( 0+slice/100, 10, 20, 30 );
-
-			or.setStrokeColor( Color.green );
-			or.setStrokeWidth( 3 );
-			//or.setStrokeColor( Color.red );
+			for( Particle p : getParticleList() )
+			{
+				final int posX = (int) Math.round( p.getFitParameterList().get( slice - 1)[ 1 ] );
+				final int posY = (int) Math.round( p.getFitParameterList().get( slice - 1)[ 2 ] );
+				
+				
+				Point point = new Point( new int[]{ posX, posY } ); 
+				DrawOverlay.addOval( point, 1, 1 , imp );
+				
+			}
 			
-			o.add( or );
+			
 		}		
 	}
 
 	private void setImp( final File file ) { this.imp = OpenImages.getFloatTypeImp( file );  }
 	public ImagePlus getImp() { return this.imp; } 
+	
+	private void setParticleList( final ArrayList<Particle> particleList ) { this.particleList = particleList; } 
+	private ArrayList<Particle> getParticleList() { return this.particleList; } 
 
 	/**
 	 * @param args
@@ -97,7 +155,8 @@ public class StartTracker
 	public static void main(String[] args) 
 	{
 		new ImageJ(); 
-		final File image = new File( "sampleEasy.tif" );
+		//final File image = new File( "sampleEasy.tif" );
+		final File image = new File( "/Volumes/HD-EU2/TIRF/20130305/priorNTP8bit.tif" );
 		new StartTracker( image );
 
 	}
