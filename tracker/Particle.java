@@ -66,11 +66,9 @@ public class Particle
 			final String header = "time" + "\t" + "posX" + "\t" + "posY" ;
 			out.println( header ); 
 			
-			int count = 0;
-			double[] normalizedPos;  
-			for( double[] fitParameter : getFitParameterList() )
+			int count = 0;  
+			for( double[] normalizedPos : getNormalizedPositionArray() )
 			{
-				normalizedPos = getNormalizedPosition(fitParameter, getInitPos() );  
 				out.println( count + "\t" + normalizedPos[ 1 ] + "\t" + normalizedPos[ 2 ] );
 				count++; 
 			}
@@ -94,9 +92,9 @@ public class Particle
 			out.println( header ); 
 			
 			int count = 0; 
-			for( double[] fitParameter : getFitParameterList() )
+			for( double distance : getDistanceArray() )
 			{
-				out.println( count + "\t" + getDistance( getPositionFromFitParameters( getInitPos() ), getPositionFromFitParameters( fitParameter ) ) );
+				out.println( count + "\t" + distance );
 				count++; 
 			}
 			
@@ -107,6 +105,17 @@ public class Particle
 			System.err.println( "Cannot write to file: " + file + " " + e ); 
 			e.printStackTrace();
 		} 
+	}
+	
+	public ArrayList<double[]> getNormalizedPositionArray()
+	{
+		ArrayList<double[]> output = new ArrayList<double[]>(); 
+		for( double[] fitParameter : getFitParameterList() )
+		{
+			output.add( getNormalizedPosition(fitParameter, getInitPos() ) ); 
+		}
+		
+		return output; 
 	}
 	
 	public double[] getPositionFromFitParameters( final double[] fitParameter )
@@ -123,6 +132,17 @@ public class Particle
 		for( int i = 0; i < a.length; i++ )
 			output[ i ] = a[ i ] - b[ i ]; 
 
+		return output; 
+	}
+	
+	public ArrayList<Double> getDistanceArray()
+	{
+		ArrayList<Double> output = new ArrayList<Double>(); 
+		for( double[] fitParameter : getFitParameterList() )
+		{
+			output.add( getDistance( getPositionFromFitParameters( getInitPos() ), getPositionFromFitParameters( fitParameter ) ) ) ;
+		}
+		
 		return output; 
 	}
 	
