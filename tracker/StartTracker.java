@@ -6,18 +6,24 @@ import ij.ImageJ;
 import ij.ImagePlus;
 import ij.gui.Overlay;
 import imgLib2Tools.Average;
+import imgLib2Tools.Histogram;
 import imgLib2Tools.Substack;
+import imgLib2Tools.Wrapper;
 import inputOutput.OpenImages;
 
 import java.io.File;
 import java.util.ArrayList;
 
+import mpicbg.imglib.algorithm.peak.GaussianPeakFitterND;
+import mpicbg.imglib.cursor.LocalizableByDimCursor;
+import mpicbg.imglib.image.Image;
 import net.imglib2.RandomAccess;
 import net.imglib2.algorithm.gauss.Gauss;
 import net.imglib2.algorithm.math.PickImagePeaks;
+import net.imglib2.algorithm.region.localneighborhood.Neighborhood;
+import net.imglib2.algorithm.region.localneighborhood.RectangleShape;
 import net.imglib2.img.ImagePlusAdapter;
 import net.imglib2.img.Img;
-import net.imglib2.img.display.imagej.ImageJFunctions;
 import net.imglib2.type.numeric.real.FloatType;
 import roiTools.DrawOverlay;
 
@@ -29,20 +35,21 @@ public class StartTracker
 	
 	public StartTracker( final File file )
 	{
+		final boolean verbose = true; 
 		setImp( file ); 
-		setParticleList( findParticles( file ) );
-		//fit(); 
+		setParticleList( findParticles( file, verbose ) );
+		fit(); 
 		
 		// add listener to the imageplus slice slider
-		//SliceObserver sliceObserver = new SliceObserver( imp, new ImagePlusListener() );
+		SliceObserver sliceObserver = new SliceObserver( imp, new ImagePlusListener() );
 	}
 	
 	/**
 	 * This method finds the starting point for the tracking. 
 	 * @param image
 	 */
-	public ArrayList<Particle> findParticles( final File file )
-	{
+	public ArrayList<Particle> findParticles( final File file, final boolean verbose )
+	{ 
 		ArrayList<Particle> particleList = new ArrayList<Particle>(); 
 		//ImagePlus imp = OpenImages.getFloatTypeImp( file ); 
 		getImp().show(); 
@@ -50,31 +57,34 @@ public class StartTracker
 		Img<FloatType> img = ImagePlusAdapter.wrap( getImp() );  
 		
 		int nrOfDimension = img.numDimensions(); 
-		//Img<FloatType> subStack = Substack.getSubstack(img, ( nrOfDimension -1) , 0, 49 );  
-		Img<net.imglib2.type.numeric.real.FloatType> averageImg = Average.averageOverDimension( img, nrOfDimension );
+		Img<FloatType> subStack = Substack.getSubstack(img, ( nrOfDimension -1) , 0, 49, verbose );  
+		Img<net.imglib2.type.numeric.real.FloatType> averageImg = Average.averageOverDimension( subStack, nrOfDimension, verbose );
 		Gauss.inFloatInPlace(1.0, averageImg); 
 		 
-		
-		PickImagePeaks<FloatType> pip = new PickImagePeaks<FloatType>( averageImg ); 
+		System.out.println( "finding peaks" ); 
+		PickImagePeaks<FloatType> pip = new PickImagePeaks<FloatType>( averageImg );
+		System.out.println( "finding peaks. Done" );
 		pip.process(); 
 		ArrayList<long[]> peakPos = pip.getPeakList(); 
 		
+		ArrayList<ArrayList<Float>> hist = Histogram.getHistogram( averageImg, 100 ); 
+		ArrayList<Float> lastBin = hist.get( hist.size() - 1 ); 
 		
 		getImp().setOverlay( new Overlay() ); 
+		getImp().getOverlay().clear();
 		
-		getImp().getOverlay().clear(); 
 		
-		RandomAccess<FloatType> r = averageImg.randomAccess(); 
 		for( long[] pos : peakPos )
-		{
-			r.setPosition( pos ); 
-			if( r.get().get() > 500 )
+		{ 
+			if( likelyPeak( pos, averageImg, lastBin.get( 0 ) ) )
 			{
 				Point point = new Point( new int[] { (int) pos[ 0 ], (int) pos[ 1 ] }  ); 
-				DrawOverlay.addOval( point, 1, 1 , imp );		
-				particleList.add( new Particle( getImp(), pos ) ); 
+				DrawOverlay.addOval( point, 1, 1 , imp );	
+				
+				
+				
+				particleList.add( new Particle( getImp(), fitGaussian( averageImg, pos ) ) ); 
 			}
-			
 		}
 		
 
@@ -90,7 +100,7 @@ public class StartTracker
 		float[] pixels = (float[]) ip.getPixels();
 		
 		//for imglib2
-		//Img<FloatType> imglib2 = ArrayImgs.floats( pixels, imp.getWidth(), imp.getHeight() );
+		Img<FloatType> imglib2 = ArrayImgs.floats( pixels, imp.getWidth(), imp.getHeight() );
 		//ImageJFunctions.show( imglib2 ); 
 		
 		// for imglib1
@@ -105,13 +115,53 @@ public class StartTracker
 		return particleList; 
 	}
 	
+	public double[] fitGaussian( final Img<FloatType> img, final long[] startingPos )
+	{
+		Image<mpicbg.imglib.type.numeric.real.FloatType> image = Wrapper.wrapToImgLib1( img ); 
+		
+		GaussianPeakFitterND<mpicbg.imglib.type.numeric.real.FloatType> fit = new GaussianPeakFitterND<mpicbg.imglib.type.numeric.real.FloatType>( image );
+		LocalizableByDimCursor<mpicbg.imglib.type.numeric.real.FloatType> cursor = image.createLocalizableByDimCursor();
+		cursor.setPosition( new int[]{ (int) startingPos[ 0 ], (int) startingPos[ 1 ] } );
+		return fit.process( cursor, new double[]{ 3, 3 } ); 
+	}
+	
+	public boolean likelyPeak( long[] peakPos, final Img<FloatType> img, final float threshold )
+	{  
+		if( peakPos[ 0 ] == 0 || peakPos[ 1 ] == 0 )
+		{
+			return false; 
+		}
+		else
+		{
+			RectangleShape shape = new RectangleShape(1,false);
+			RandomAccess<Neighborhood<FloatType>> a = shape.neighborhoods( img ).randomAccess(); 
+			a.setPosition( peakPos );
+			
+			boolean allBiggerThanThreshold = true; 
+			for( final FloatType value : a.get() )
+			{
+				if( value.get() < threshold )
+				{
+					allBiggerThanThreshold = false; 
+					break; 
+				} 
+			}
+			
+			return allBiggerThanThreshold;  
+		}
+	}
+	
 	public void fit()
 	{
 		//int[] initPos = new int[]{ 45, 28 }; 
 		//Particle p = new Particle( getImp(), initPos);
 		//getParticleList().add( p );
 		for( Particle p : getParticleList() )
+		{
 			p.trackOverStack(); 
+			p.writeDistance(); 
+			p.writeNormalizedPosition();
+		}
 		 
 	}
 	
@@ -156,7 +206,9 @@ public class StartTracker
 	{
 		new ImageJ(); 
 		//final File image = new File( "sampleEasy.tif" );
-		final File image = new File( "/Volumes/HD-EU2/TIRF/20130305/priorNTP8bit.tif" );
+		//final File image = new File( "sampleRunShort.tif" );
+		final File image = new File( "run-file002.tif"); 
+		//final File image = new File( "/Volumes/HD-EU2/TIRF/20130305/priorNTP32bit.tif" );
 		new StartTracker( image );
 
 	}

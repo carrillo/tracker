@@ -8,8 +8,11 @@ import net.imglib2.type.numeric.real.FloatType;
 
 public class Average 
 {
-	public static Img<FloatType> averageOverDimension( final Img<FloatType> img, final int dimensionToAverageOver )
+	public static Img<FloatType> averageOverDimension( final Img<FloatType> img, final int dimensionToAverageOver, final boolean verbose )
 	{
+		if( verbose )
+			System.out.println( "Averaging image.");
+		
 		long[] newDim = new long[ img.numDimensions() - 1 ];
 		int newIndex = 0;
 		long stackCount = 0; 
@@ -60,6 +63,9 @@ public class Average
 			outputCursor.next(); 
 			outputCursor.get().mul( 1.0/ ( (float) stackCount) ); 
 		}
+		
+		if( verbose )
+			System.out.println( "Done.\n-----");
 		
 		return imgOutput; 
 	}

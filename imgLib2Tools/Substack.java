@@ -9,8 +9,11 @@ import net.imglib2.type.numeric.real.FloatType;
 
 public class Substack 
 {
-	public static Img<FloatType> getSubstack( final Img<FloatType> img, final int dimension, final long minStack, final long maxStack )
+	public static Img<FloatType> getSubstack( final Img<FloatType> img, final int dimension, final long minStack, final long maxStack, final boolean verbose )
 	{
+		if( verbose )
+			System.out.println( "Creating substack. From stack " + minStack + " to " + maxStack );
+		
 		final long[] newDim = new long[ img.numDimensions() ];
 		for( int i = 0; i < newDim.length; i++ )
 		{ 
@@ -39,6 +42,8 @@ public class Substack
 			inputRandomAccess.setPosition( currentPos ); 
 			outputCursor.get().set( inputRandomAccess.get().get() ); 
 		}
+		if( verbose )
+			System.out.println( "Creating substack. Done.\n-----" );
 		
 		return outputImg; 
 	}
