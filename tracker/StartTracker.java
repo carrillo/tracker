@@ -38,12 +38,16 @@ public class StartTracker
 	
 	public StartTracker( final File file )
 	{
-		final boolean verbose = true;
 		setFile( file ); 
+		String name = getFile().getName();
+		String id = name.substring( 0, name.indexOf( ".") );
+		System.out.println( id ); 
+		
+		final boolean verbose = true;
 		setImp( getFile() ); 
 		setParticleList( findParticles( getFile(), verbose ) );
 		fit(); 
-		write(); 
+		write( id ); 			
 		
 		// add listener to the imageplus slice slider
 		SliceObserver sliceObserver = new SliceObserver( imp, new ImagePlusListener() );
@@ -57,8 +61,9 @@ public class StartTracker
 	{ 
 		ArrayList<Particle> particleList = new ArrayList<Particle>(); 
 		//ImagePlus imp = OpenImages.getFloatTypeImp( file ); 
-		getImp().show(); 
-		 
+		getImp().show();  
+		//getImp().getCalibration().frameInterval 
+		
 		Img<FloatType> img = ImagePlusAdapter.wrap( getImp() );  
 		
 		int nrOfDimension = img.numDimensions(); 
@@ -88,7 +93,7 @@ public class StartTracker
 				
 				
 				
-				particleList.add( new Particle( getImp(), fitGaussian( averageImg, pos ) ) ); 
+				particleList.add( new Particle( getImp(), fitGaussian( averageImg, pos ), this ) ); 
 			}
 		}
 		
@@ -167,13 +172,14 @@ public class StartTracker
 		 
 	}
 	
-	public void write()
+	public void write( final String id )
 	{
-		writeDistanceArray(); 
-		writeNormPositionArray(); 
+		writeDistanceArray( id ); 
+		writeSDArray( id, 10 );
+		writeNormPositionArray( id ); 
 	}
 	
-	public void writeDistanceArray()
+	public void writeDistanceArray( final String fileId )
 	{
 		ArrayList<ArrayList<Double>> distanceMatrix = new ArrayList<ArrayList<Double>>();
 		ArrayList<String> idList = new ArrayList<String>(); 
@@ -183,7 +189,7 @@ public class StartTracker
 			distanceMatrix.add( p.getDistanceArray() ); 
 		}
 		
-		final File file = new File( "temp/" + getFile().getName() + ".distance"); 
+		final File file = new File( "temp/" + fileId + ".distance"); 
 		System.out.println( "Writing distance array to file: " + file.getAbsolutePath() ); 
 		try 
 		{
@@ -219,7 +225,53 @@ public class StartTracker
 		System.out.println( "Writing distance array to file. Done\n----- ");
 	}
 	
-	public void writeNormPositionArray()
+	public void writeSDArray( final String fileId, final int windowSize )
+	{
+		ArrayList<ArrayList<Double>> sdMatrix = new ArrayList<ArrayList<Double>>();
+		ArrayList<String> idList = new ArrayList<String>(); 
+		for( Particle p : getParticleList() )
+		{ 
+			idList.add( p.toString() ); 
+			sdMatrix.add( p.getSDArray( p.getDistanceArray(), windowSize ) ); 
+		}
+		
+		final File file = new File( "temp/" + fileId + ".sd"); 
+		System.out.println( "Writing sd array to file: " + file.getAbsolutePath() ); 
+		try 
+		{
+			PrintWriter out = new PrintWriter( file );
+			String header = "time"; 
+			for( String s : idList )
+			{
+				header += "\t" + s; 
+			}
+			out.println( header ); 
+			
+			
+			int count = 0;
+			String line; 
+			for( int i = 0; i < sdMatrix.get( 0 ).size(); i++ )
+			{
+				line = "" + count;  
+				
+				for( ArrayList<Double> distanceList : sdMatrix )
+				{					
+					line += "\t" + distanceList.get( i );  
+				}
+				out.println( line ); 
+				count++; 
+			}
+			out.close(); 
+			
+		} catch (FileNotFoundException e) 
+		{
+			System.err.println( "Cannot write to file: " + file + " " + e ); 
+			e.printStackTrace();
+		} 
+		System.out.println( "Writing sd array to file. Done\n----- ");
+	}
+	
+	public void writeNormPositionArray( final String fileId )
 	{
 		ArrayList<ArrayList<double[]>> positionMatrix = new ArrayList<ArrayList<double[]>>();
 		ArrayList<String> idList = new ArrayList<String>(); 
@@ -229,7 +281,7 @@ public class StartTracker
 			positionMatrix.add( p.getNormalizedPositionArray() ); 
 		}
 		
-		final File file = new File( "temp/" + getFile().getName() + ".position"); 
+		final File file = new File( "temp/" + fileId + ".position"); 
 		try 
 		{
 			System.out.println( "Writing normalized position array to file: " + file.getAbsolutePath() ); 
