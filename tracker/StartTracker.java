@@ -9,10 +9,13 @@ import imgLib2Tools.Average;
 import imgLib2Tools.Histogram;
 import imgLib2Tools.Substack;
 import imgLib2Tools.Wrapper;
+import inputOutput.ObjectFileAccess;
 import inputOutput.OpenImages;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 
@@ -26,6 +29,7 @@ import net.imglib2.algorithm.region.localneighborhood.Neighborhood;
 import net.imglib2.algorithm.region.localneighborhood.RectangleShape;
 import net.imglib2.img.ImagePlusAdapter;
 import net.imglib2.img.Img;
+import net.imglib2.img.display.imagej.ImageJFunctions;
 import net.imglib2.type.numeric.real.FloatType;
 import roiTools.DrawOverlay;
 
@@ -33,8 +37,7 @@ public class StartTracker
 {
 	private File file; 
 	private ImagePlus imp;
-	private ArrayList<Particle> particleList;
-	//private ArrayList<double[]> fitParameterList; 
+	private ParticleCollection particleCollection;  
 	
 	public StartTracker( final File file )
 	{
@@ -45,9 +48,10 @@ public class StartTracker
 		
 		final boolean verbose = true;
 		setImp( getFile() ); 
-		setParticleList( findParticles( getFile(), verbose ) );
-		fit(); 
-		write( id ); 			
+		setParticleCollection( findParticles( getFile(), verbose ) );
+		fit();
+		//writeParticleCollection( "particleCollection.obj" ); 
+		getParticleCollection().writeOutputFiles( id ); 			
 		
 		// add listener to the imageplus slice slider
 		SliceObserver sliceObserver = new SliceObserver( imp, new ImagePlusListener() );
@@ -57,7 +61,7 @@ public class StartTracker
 	 * This method finds the starting point for the tracking. 
 	 * @param image
 	 */
-	public ArrayList<Particle> findParticles( final File file, final boolean verbose )
+	public ParticleCollection findParticles( final File file, final boolean verbose )
 	{ 
 		ArrayList<Particle> particleList = new ArrayList<Particle>(); 
 		//ImagePlus imp = OpenImages.getFloatTypeImp( file ); 
@@ -69,6 +73,7 @@ public class StartTracker
 		int nrOfDimension = img.numDimensions(); 
 		Img<FloatType> subStack = Substack.getSubstack(img, ( nrOfDimension -1) , 0, 49, verbose );  
 		Img<net.imglib2.type.numeric.real.FloatType> averageImg = Average.averageOverDimension( subStack, nrOfDimension, verbose );
+		ImageJFunctions.show( averageImg ); 
 		Gauss.inFloatInPlace(1.0, averageImg); 
 		 
 		System.out.println( "finding peaks" ); 
@@ -77,7 +82,8 @@ public class StartTracker
 		pip.process(); 
 		ArrayList<long[]> peakPos = pip.getPeakList(); 
 		
-		ArrayList<ArrayList<Float>> hist = Histogram.getHistogram( averageImg, 100 ); 
+		
+		ArrayList<ArrayList<Float>> hist = Histogram.getHistogram( averageImg, 10 ); 
 		ArrayList<Float> lastBin = hist.get( hist.size() - 1 ); 
 		
 		getImp().setOverlay( new Overlay() ); 
@@ -86,7 +92,7 @@ public class StartTracker
 		
 		for( long[] pos : peakPos )
 		{ 
-			if( likelyPeak( pos, averageImg, lastBin.get( 0 ) ) )
+			//if( likelyPeak( pos, averageImg, lastBin.get( 0 ) ) )
 			{
 				Point point = new Point( new int[] { (int) pos[ 0 ], (int) pos[ 1 ] }  ); 
 				DrawOverlay.addOval( point, 1, 1 , imp );	
@@ -122,7 +128,7 @@ public class StartTracker
 		*/
 		
 		 
-		return particleList; 
+		return new ParticleCollection( particleList ); 
 	}
 	
 	public double[] fitGaussian( final Img<FloatType> img, final long[] startingPos )
@@ -132,7 +138,7 @@ public class StartTracker
 		GaussianPeakFitterND<mpicbg.imglib.type.numeric.real.FloatType> fit = new GaussianPeakFitterND<mpicbg.imglib.type.numeric.real.FloatType>( image );
 		LocalizableByDimCursor<mpicbg.imglib.type.numeric.real.FloatType> cursor = image.createLocalizableByDimCursor();
 		cursor.setPosition( new int[]{ (int) startingPos[ 0 ], (int) startingPos[ 1 ] } );
-		return fit.process( cursor, new double[]{ 3, 3 } ); 
+		return fit.process( cursor, new double[]{ 5, 5 } ); 
 	}
 	
 	public boolean likelyPeak( long[] peakPos, final Img<FloatType> img, final float threshold )
@@ -163,160 +169,21 @@ public class StartTracker
 	
 	public void fit()
 	{
-		for( Particle p : getParticleList() )
+		for( Particle p : getParticleCollection().getParticleList() )
 		{
 			p.trackOverStack(); 
 			p.writeDistance(); 
 			p.writeNormalizedPosition();
+			p.writePosition(); 
 		}
 		 
 	}
 	
-	public void write( final String id )
+	public void writeParticleCollection( final String outputFile )
 	{
-		writeDistanceArray( id ); 
-		writeSDArray( id, 10 );
-		writeNormPositionArray( id ); 
+		ObjectFileAccess.saveObjectToFile( getParticleCollection(), outputFile ); 
 	}
-	
-	public void writeDistanceArray( final String fileId )
-	{
-		ArrayList<ArrayList<Double>> distanceMatrix = new ArrayList<ArrayList<Double>>();
-		ArrayList<String> idList = new ArrayList<String>(); 
-		for( Particle p : getParticleList() )
-		{ 
-			idList.add( p.toString() ); 
-			distanceMatrix.add( p.getDistanceArray() ); 
-		}
-		
-		final File file = new File( "temp/" + fileId + ".distance"); 
-		System.out.println( "Writing distance array to file: " + file.getAbsolutePath() ); 
-		try 
-		{
-			PrintWriter out = new PrintWriter( file );
-			String header = "time"; 
-			for( String s : idList )
-			{
-				header += "\t" + s; 
-			}
-			out.println( header ); 
-			
-			
-			int count = 0;
-			String line; 
-			for( int i = 0; i < distanceMatrix.get( 0 ).size(); i++ )
-			{
-				line = "" + count;  
-				
-				for( ArrayList<Double> distanceList : distanceMatrix )
-				{					
-					line += "\t" + distanceList.get( i );  
-				}
-				out.println( line ); 
-				count++; 
-			}
-			out.close(); 
-			
-		} catch (FileNotFoundException e) 
-		{
-			System.err.println( "Cannot write to file: " + file + " " + e ); 
-			e.printStackTrace();
-		} 
-		System.out.println( "Writing distance array to file. Done\n----- ");
-	}
-	
-	public void writeSDArray( final String fileId, final int windowSize )
-	{
-		ArrayList<ArrayList<Double>> sdMatrix = new ArrayList<ArrayList<Double>>();
-		ArrayList<String> idList = new ArrayList<String>(); 
-		for( Particle p : getParticleList() )
-		{ 
-			idList.add( p.toString() ); 
-			sdMatrix.add( p.getSDArray( p.getDistanceArray(), windowSize ) ); 
-		}
-		
-		final File file = new File( "temp/" + fileId + ".sd"); 
-		System.out.println( "Writing sd array to file: " + file.getAbsolutePath() ); 
-		try 
-		{
-			PrintWriter out = new PrintWriter( file );
-			String header = "time"; 
-			for( String s : idList )
-			{
-				header += "\t" + s; 
-			}
-			out.println( header ); 
-			
-			
-			int count = 0;
-			String line; 
-			for( int i = 0; i < sdMatrix.get( 0 ).size(); i++ )
-			{
-				line = "" + count;  
-				
-				for( ArrayList<Double> distanceList : sdMatrix )
-				{					
-					line += "\t" + distanceList.get( i );  
-				}
-				out.println( line ); 
-				count++; 
-			}
-			out.close(); 
-			
-		} catch (FileNotFoundException e) 
-		{
-			System.err.println( "Cannot write to file: " + file + " " + e ); 
-			e.printStackTrace();
-		} 
-		System.out.println( "Writing sd array to file. Done\n----- ");
-	}
-	
-	public void writeNormPositionArray( final String fileId )
-	{
-		ArrayList<ArrayList<double[]>> positionMatrix = new ArrayList<ArrayList<double[]>>();
-		ArrayList<String> idList = new ArrayList<String>(); 
-		for( Particle p : getParticleList() )
-		{
-			idList.add( p.toString() ); 
-			positionMatrix.add( p.getNormalizedPositionArray() ); 
-		}
-		
-		final File file = new File( "temp/" + fileId + ".position"); 
-		try 
-		{
-			System.out.println( "Writing normalized position array to file: " + file.getAbsolutePath() ); 
-			PrintWriter out = new PrintWriter( file );
-			String header = "time"; 
-			for( String s : idList )
-			{
-				header += "\t" + s; 
-			}
-			out.println( header ); 
-			
-			
-			int count = 0;
-			String line; 
-			for( int i = 0; i < positionMatrix.get( 0 ).size(); i++ )
-			{
-				line = "" + count; 
-				
-				for( ArrayList<double[]> positionList : positionMatrix )
-				{
-					line += "\t" + positionList.get( i )[ 1 ] + ";" + positionList.get( i )[ 2 ];  
-				}
-				out.println( line ); 
-				count++; 
-			}
-			out.close(); 
-			
-		} catch (FileNotFoundException e) 
-		{
-			System.err.println( "Cannot write to file: " + file + " " + e ); 
-			e.printStackTrace();
-		} 
-		System.out.println( "Writing normalized position array to file. Done\n----- ");
-	}
-	
+
 	protected class ImagePlusListener implements SliceListener
 	{
 		@Override
@@ -330,7 +197,7 @@ public class StartTracker
 			
 			getImp().getOverlay().clear(); 
 			
-			for( Particle p : getParticleList() )
+			for( Particle p : getParticleCollection().getParticleList() )
 			{
 				final int posX = (int) Math.round( p.getFitParameterList().get( slice - 1)[ 1 ] );
 				final int posY = (int) Math.round( p.getFitParameterList().get( slice - 1)[ 2 ] );
@@ -351,8 +218,10 @@ public class StartTracker
 	private void setImp( final File file ) { this.imp = OpenImages.getFloatTypeImp( file );  }
 	public ImagePlus getImp() { return this.imp; } 
 	
-	private void setParticleList( final ArrayList<Particle> particleList ) { this.particleList = particleList; } 
-	private ArrayList<Particle> getParticleList() { return this.particleList; } 
+	private void setParticleCollection( final ParticleCollection pc ) { this.particleCollection = pc; }
+	public ParticleCollection getParticleCollection() { return this.particleCollection; } 
+ 
+	//private ArrayList<Particle> getParticleList() { return this.particleCollection.getParticleList(); } 
 
 	/**
 	 * @param args
@@ -361,7 +230,7 @@ public class StartTracker
 	{
 		new ImageJ(); 
 		//final File image = new File( "sampleEasyShort.tif" );
-		final File image = new File( "sampleRunShort.tif" );
+		final File image = new File( "temp.tif" );
 		//final File image = new File( "run-file002.tif"); 
 		//final File image = new File( "/Volumes/HD-EU2/TIRF/20130305/priorNTP32bit.tif" );
 		new StartTracker( image );

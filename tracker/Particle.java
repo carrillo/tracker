@@ -1,37 +1,45 @@
 package tracker;
 
-import ij.ImageJ;
 import ij.ImagePlus;
 import ij.process.ImageProcessor;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
+import java.io.Serializable;
 import java.util.ArrayList;
-
-import org.apache.commons.math.complex.Complex;
-import org.apache.commons.math.stat.descriptive.SummaryStatistics;
-import org.apache.commons.math.stat.descriptive.moment.Variance;
-import org.apache.commons.math.transform.FastFourierTransformer;
 
 import mpicbg.imglib.algorithm.peak.GaussianPeakFitterND;
 import mpicbg.imglib.cursor.LocalizableByDimCursor;
 import mpicbg.imglib.image.Image;
-import mpicbg.imglib.type.numeric.real.FloatType;
 import mpicbg.imglib.util.DevUtil;
+import net.imglib2.Localizable;
 import net.imglib2.RandomAccess;
+import net.imglib2.algorithm.localization.Gaussian;
+import net.imglib2.algorithm.localization.LevenbergMarquardtSolver;
+import net.imglib2.algorithm.localization.MLEllipticGaussianEstimator;
+import net.imglib2.algorithm.localization.PeakFitter;
 import net.imglib2.img.Img;
 import net.imglib2.img.array.ArrayImgs;
+import net.imglib2.type.numeric.real.FloatType;
 
-public class Particle 
+import org.apache.commons.math.complex.Complex;
+import org.apache.commons.math.stat.descriptive.SummaryStatistics;
+import org.apache.commons.math.transform.FastFourierTransformer;
+
+public class Particle implements Serializable 
 {
+	/**
+	 * 
+	 */
+	private static final long serialVersionUID = 1L;
 	private StartTracker tracker; 
 	private double[] initPos; 
 	private ArrayList<double[]> fitParameterList; 
 	private ArrayList<Double> timeList; 
 	private ImagePlus imp;
 	
-	public Particle( final ImagePlus imp, final double[] initPos, final StartTracker tracker )
+	public Particle( final ImagePlus imp, final double[] initPos, final StartTracker tracker ) 
 	{
 		setTracker( tracker ); 
 		setFitParameterList( new ArrayList<double[]>() );
@@ -50,35 +58,41 @@ public class Particle
 			ImageProcessor ip = getImp().getImageStack().getProcessor( i );  
 			float[] pixels = (float[]) ip.getPixels();
 			
+			/*
 			Image<FloatType> currentStack =  DevUtil.createImageFromArray( pixels, new int[]{ imp.getWidth(), imp.getHeight() } );
-			
 			GaussianPeakFitterND<FloatType> fit = new GaussianPeakFitterND<FloatType>( currentStack ); 
 			LocalizableByDimCursor<FloatType> cursor = currentStack.createLocalizableByDimCursor();
 			cursor.setPosition( new int[] {(int) Math.round( lastFitParameter[ 1 ] ), (int) Math.round( lastFitParameter[ 2 ] )} );
 			newFitParameter = fit.process( cursor, new double[]{ 2.5, 2.5 } );
 			
-			/*
+			
+			*/
 			Img<FloatType> currentStack = ArrayImgs.floats( pixels, getImp().getWidth(), getImp().getHeight() );
-			GaussianPeakFitterND<FloatType> fit = new GaussianPeakFitterND<FloatType>( currentStack ); 
 			RandomAccess<FloatType> cursor = currentStack.randomAccess(); 
 			cursor.setPosition( new int[]{ (int) Math.round( lastFitParameter[ 1 ]), (int) Math.round( lastFitParameter[ 2 ] ) } ); 
-			newFitParameter = fit.process( cursor, new double[]{2.5, 2.5} ); 
-			 */
+			ArrayList<Localizable> peaks = new ArrayList<Localizable>();
+			peaks.add( cursor ); 
+			final double sigmaX = Math.sqrt( 1.0 / lastFitParameter[ 3 ] ); 
+			final double sigmaY = Math.sqrt( 1.0 / lastFitParameter[ 4 ] ); 
+			MLEllipticGaussianEstimator estimator = new MLEllipticGaussianEstimator( new double[]{ sigmaX, sigmaY } ); 
+			PeakFitter<FloatType> peakFitter = new PeakFitter<FloatType>( currentStack, peaks, new LevenbergMarquardtSolver(300, 1e-3d, 1e-1d), new Gaussian(), estimator );
+			peakFitter.process(); 
+			newFitParameter = peakFitter.getResult().get( cursor );  
+			 
+			
 			
 			System.out.println( i + "\t" + newFitParameter[ 1 ] + " " + newFitParameter[ 2 ] + " " + newFitParameter[ 3 ] + " " + newFitParameter[ 4 ] ); 
 			getFitParameterList().add( newFitParameter );
 			
 			//Check if there's no jump
-			//if( getDistance( newFitParameter, lastFitParameter) <= 5.0 )
-				//lastFitParameter = newFitParameter; 
+			if( getDistance( newFitParameter, lastFitParameter) <= 5.0 )
+				lastFitParameter = newFitParameter; 
 		}
 	}
 	
-	
-	
 	public void writeNormalizedPosition()
 	{
-		final File file = new File( "temp/" + toString() + ".position"); 
+		final File file = new File( "temp/" + toString() + ".normposition"); 
 		try 
 		{
 			PrintWriter out = new PrintWriter( file );
@@ -89,6 +103,31 @@ public class Particle
 			for( double[] normalizedPos : getNormalizedPositionArray() )
 			{
 				out.println( count + "\t" + normalizedPos[ 1 ] + "\t" + normalizedPos[ 2 ] );
+				count++; 
+			}
+			
+			out.close(); 
+			
+		} catch (FileNotFoundException e) 
+		{
+			System.err.println( "Cannot write to file: " + file + " " + e ); 
+			e.printStackTrace();
+		} 
+	}
+	
+	public void writePosition()
+	{
+		final File file = new File( "temp/" + toString() + ".position"); 
+		try 
+		{
+			PrintWriter out = new PrintWriter( file );
+			final String header = "time" + "\t" + "posX" + "\t" + "posY" ;
+			out.println( header ); 
+			
+			int count = 0;  
+			for( double[] normalizedPos : getPositionArray() )
+			{
+				out.println( count + "\t" + normalizedPos[ 0 ] + "\t" + normalizedPos[ 1 ] );
 				count++; 
 			}
 			
@@ -126,6 +165,17 @@ public class Particle
 			System.err.println( "Cannot write to file: " + file + " " + e ); 
 			e.printStackTrace();
 		} 
+	}
+	
+	public ArrayList<double[]> getPositionArray()
+	{ 
+		ArrayList<double[]> output = new ArrayList<double[]>(); 
+		for( double[] fitParameter : getFitParameterList() )
+		{
+			output.add( getPositionFromFitParameters( fitParameter ) ); 
+		}
+		
+		return output; 
 	}
 	
 	public ArrayList<double[]> getNormalizedPositionArray()
