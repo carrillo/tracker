@@ -48,8 +48,9 @@ public class StartTracker
 		
 		final boolean verbose = true;
 		setImp( getFile() ); 
-		setParticleCollection( findParticles( getFile(), verbose ) );
+		setParticleCollection( findParticles( getFile(), verbose ) ); 
 		fit();
+		getParticleCollection().analyze(); 
 		//writeParticleCollection( "particleCollection.obj" ); 
 		getParticleCollection().writeOutputFiles( id ); 			
 		
@@ -73,17 +74,17 @@ public class StartTracker
 		int nrOfDimension = img.numDimensions(); 
 		Img<FloatType> subStack = Substack.getSubstack(img, ( nrOfDimension -1) , 0, 49, verbose );  
 		Img<net.imglib2.type.numeric.real.FloatType> averageImg = Average.averageOverDimension( subStack, nrOfDimension, verbose );
-		ImageJFunctions.show( averageImg ); 
+		//ImageJFunctions.show( averageImg ); 
 		Gauss.inFloatInPlace(1.0, averageImg); 
 		 
 		System.out.println( "finding peaks" ); 
 		PickImagePeaks<FloatType> pip = new PickImagePeaks<FloatType>( averageImg );
-		System.out.println( "finding peaks. Done" );
+		
 		pip.process(); 
 		ArrayList<long[]> peakPos = pip.getPeakList(); 
 		
 		
-		ArrayList<ArrayList<Float>> hist = Histogram.getHistogram( averageImg, 10 ); 
+		ArrayList<ArrayList<Float>> hist = Histogram.getHistogram( averageImg, 100 ); 
 		ArrayList<Float> lastBin = hist.get( hist.size() - 1 ); 
 		
 		getImp().setOverlay( new Overlay() ); 
@@ -92,7 +93,7 @@ public class StartTracker
 		
 		for( long[] pos : peakPos )
 		{ 
-			//if( likelyPeak( pos, averageImg, lastBin.get( 0 ) ) )
+			if( likelyPeak( pos, averageImg, lastBin.get( 0 ) ) )
 			{
 				Point point = new Point( new int[] { (int) pos[ 0 ], (int) pos[ 1 ] }  ); 
 				DrawOverlay.addOval( point, 1, 1 , imp );	
@@ -103,6 +104,7 @@ public class StartTracker
 			}
 		}
 		
+		System.out.println( "Found " + particleList.size() + " particles."  );
 
 		/*
 		ImageJFunctions.show( averageImg ); 
@@ -128,7 +130,7 @@ public class StartTracker
 		*/
 		
 		 
-		return new ParticleCollection( particleList ); 
+		return new ParticleCollection( getImp(), particleList ); 
 	}
 	
 	public double[] fitGaussian( final Img<FloatType> img, final long[] startingPos )
@@ -172,9 +174,7 @@ public class StartTracker
 		for( Particle p : getParticleCollection().getParticleList() )
 		{
 			p.trackOverStack(); 
-			p.writeDistance(); 
-			p.writeNormalizedPosition();
-			p.writePosition(); 
+			
 		}
 		 
 	}
@@ -199,8 +199,8 @@ public class StartTracker
 			
 			for( Particle p : getParticleCollection().getParticleList() )
 			{
-				final int posX = (int) Math.round( p.getFitParameterList().get( slice - 1)[ 1 ] );
-				final int posY = (int) Math.round( p.getFitParameterList().get( slice - 1)[ 2 ] );
+				final int posX = (int) Math.round( p.getPositionArray().get( slice - 1)[ 0 ] );
+				final int posY = (int) Math.round( p.getPositionArray().get( slice - 1)[ 1 ] );
 				
 				
 				Point point = new Point( new int[]{ posX, posY } ); 
@@ -228,12 +228,22 @@ public class StartTracker
 	 */
 	public static void main(String[] args) 
 	{
-		new ImageJ(); 
-		//final File image = new File( "sampleEasyShort.tif" );
-		final File image = new File( "temp.tif" );
+		new ImageJ();
+		/*
+		final File dir = new File( "/Users/carrillo/temp/runFiles/" );
+		for( String name : dir.list() )
+		{  
+			final File image = new File( dir.getAbsolutePath() + "/" + name );
+			new StartTracker( image );
+		}
+		*/
+		final File image = new File(  "/Users/carrillo/temp/20130403/run32bit.tif" );
+		//final File image = new File(  "/Users/carrillo/temp/runFiles/flow_02_Opt25_32bit.tif" );
+		new StartTracker( image );
+		//final File image = new File( "temp.tif" );
 		//final File image = new File( "run-file002.tif"); 
 		//final File image = new File( "/Volumes/HD-EU2/TIRF/20130305/priorNTP32bit.tif" );
-		new StartTracker( image );
+		//
 
 	}
 

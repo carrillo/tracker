@@ -18,12 +18,14 @@ import net.imglib2.RandomAccess;
 import net.imglib2.algorithm.localization.Gaussian;
 import net.imglib2.algorithm.localization.LevenbergMarquardtSolver;
 import net.imglib2.algorithm.localization.MLEllipticGaussianEstimator;
+import net.imglib2.algorithm.localization.MLGaussianEstimator;
 import net.imglib2.algorithm.localization.PeakFitter;
 import net.imglib2.img.Img;
 import net.imglib2.img.array.ArrayImgs;
 import net.imglib2.type.numeric.real.FloatType;
 
 import org.apache.commons.math.complex.Complex;
+import org.apache.commons.math.stat.descriptive.DescriptiveStatistics;
 import org.apache.commons.math.stat.descriptive.SummaryStatistics;
 import org.apache.commons.math.transform.FastFourierTransformer;
 
@@ -68,20 +70,9 @@ public class Particle implements Serializable
 			
 			*/
 			Img<FloatType> currentStack = ArrayImgs.floats( pixels, getImp().getWidth(), getImp().getHeight() );
-			RandomAccess<FloatType> cursor = currentStack.randomAccess(); 
-			cursor.setPosition( new int[]{ (int) Math.round( lastFitParameter[ 1 ]), (int) Math.round( lastFitParameter[ 2 ] ) } ); 
-			ArrayList<Localizable> peaks = new ArrayList<Localizable>();
-			peaks.add( cursor ); 
-			final double sigmaX = Math.sqrt( 1.0 / lastFitParameter[ 3 ] ); 
-			final double sigmaY = Math.sqrt( 1.0 / lastFitParameter[ 4 ] ); 
-			MLEllipticGaussianEstimator estimator = new MLEllipticGaussianEstimator( new double[]{ sigmaX, sigmaY } ); 
-			PeakFitter<FloatType> peakFitter = new PeakFitter<FloatType>( currentStack, peaks, new LevenbergMarquardtSolver(300, 1e-3d, 1e-1d), new Gaussian(), estimator );
-			peakFitter.process(); 
-			newFitParameter = peakFitter.getResult().get( cursor );  
-			 
+			newFitParameter = fitUsingSymetricGaussian( currentStack, lastFitParameter); 
+			System.out.println( i + ":\t" + arrayTools.DoubleArrayTools.arrayToString( newFitParameter )); 
 			
-			
-			System.out.println( i + "\t" + newFitParameter[ 1 ] + " " + newFitParameter[ 2 ] + " " + newFitParameter[ 3 ] + " " + newFitParameter[ 4 ] ); 
 			getFitParameterList().add( newFitParameter );
 			
 			//Check if there's no jump
@@ -90,82 +81,42 @@ public class Particle implements Serializable
 		}
 	}
 	
-	public void writeNormalizedPosition()
+	public double[] fitUsingSymetricGaussian( Img<FloatType> currentStack, final double[] lastFitParameter )
 	{
-		final File file = new File( "temp/" + toString() + ".normposition"); 
-		try 
-		{
-			PrintWriter out = new PrintWriter( file );
-			final String header = "time" + "\t" + "posX" + "\t" + "posY" ;
-			out.println( header ); 
-			
-			int count = 0;  
-			for( double[] normalizedPos : getNormalizedPositionArray() )
-			{
-				out.println( count + "\t" + normalizedPos[ 1 ] + "\t" + normalizedPos[ 2 ] );
-				count++; 
-			}
-			
-			out.close(); 
-			
-		} catch (FileNotFoundException e) 
-		{
-			System.err.println( "Cannot write to file: " + file + " " + e ); 
-			e.printStackTrace();
-		} 
+		//Create starting position for peak fitting
+		RandomAccess<FloatType> cursor = currentStack.randomAccess(); 
+		cursor.setPosition( new int[]{ (int) Math.round( lastFitParameter[ 1 ]), (int) Math.round( lastFitParameter[ 2 ] ) } ); 
+		ArrayList<Localizable> peaks = new ArrayList<Localizable>();
+		peaks.add( cursor ); 
+		
+		//Estimate sigma using prior fit 
+		final double sigma = Math.sqrt( 1.0 / lastFitParameter[ 2 ] ); 
+		
+		//Fit 
+		MLGaussianEstimator estimator = new MLGaussianEstimator( sigma, 2 ); 
+		PeakFitter<FloatType> peakFitter = new PeakFitter<FloatType>( currentStack, peaks, new LevenbergMarquardtSolver(300, 1e-3d, 1e-1d), new Gaussian(), estimator );
+		peakFitter.process(); 
+		double[] result = peakFitter.getResult().get( cursor );
+		
+		return result; 
 	}
 	
-	public void writePosition()
+	public double[] fitUsingEllipticGaussian( Img<FloatType> currentStack, final double[] lastFitParameter )
 	{
-		final File file = new File( "temp/" + toString() + ".position"); 
-		try 
-		{
-			PrintWriter out = new PrintWriter( file );
-			final String header = "time" + "\t" + "posX" + "\t" + "posY" ;
-			out.println( header ); 
-			
-			int count = 0;  
-			for( double[] normalizedPos : getPositionArray() )
-			{
-				out.println( count + "\t" + normalizedPos[ 0 ] + "\t" + normalizedPos[ 1 ] );
-				count++; 
-			}
-			
-			out.close(); 
-			
-		} catch (FileNotFoundException e) 
-		{
-			System.err.println( "Cannot write to file: " + file + " " + e ); 
-			e.printStackTrace();
-		} 
+		RandomAccess<FloatType> cursor = currentStack.randomAccess(); 
+		cursor.setPosition( new int[]{ (int) Math.round( lastFitParameter[ 0 ]), (int) Math.round( lastFitParameter[ 1 ] ) } ); 
+		ArrayList<Localizable> peaks = new ArrayList<Localizable>();
+		peaks.add( cursor ); 
+		//final double sigmaX = Math.sqrt( 1.0 / lastFitParameter[ 3 ] ); 
+		//final double sigmaY = Math.sqrt( 1.0 / lastFitParameter[ 4 ] );
+		final double sigmaX = 2.5; 
+		final double sigmaY = 2.5;
+		MLEllipticGaussianEstimator estimator = new MLEllipticGaussianEstimator( new double[]{ sigmaX, sigmaY } );
+		PeakFitter<FloatType> peakFitter = new PeakFitter<FloatType>( currentStack, peaks, new LevenbergMarquardtSolver(300, 1e-3d, 1e-1d), new Gaussian(), estimator );
+		peakFitter.process(); 
+		return peakFitter.getResult().get( cursor );
 	}
 	
-	public void writeDistance()
-	{
-		final File file = new File( "temp/" + toString() + ".distance"); 
-		try 
-		{
-			PrintWriter out = new PrintWriter( file );
-			final String header = "time" + "\t" + "distance" + "\t" + "sd";
-			out.println( header ); 
-			
-			int count = 0; 
-			ArrayList<Double> distanceArray = getDistanceArray(); 
-			ArrayList<Double> sdArray = getSDArray( distanceArray, 10 );
-			for( int i = 0; i < distanceArray.size(); i++ )
-			{
-				out.println( count + "\t" + distanceArray.get( i ) + "\t" + sdArray.get( i ) );
-				count++; 
-			}
-			
-			out.close(); 
-			
-		} catch (FileNotFoundException e) 
-		{
-			System.err.println( "Cannot write to file: " + file + " " + e ); 
-			e.printStackTrace();
-		} 
-	}
 	
 	public ArrayList<double[]> getPositionArray()
 	{ 
@@ -178,15 +129,32 @@ public class Particle implements Serializable
 		return output; 
 	}
 	
-	public ArrayList<double[]> getNormalizedPositionArray()
+	public ArrayList<double[]> getNormalizedPositionArray( double[] normalPosition )
 	{ 
 		ArrayList<double[]> output = new ArrayList<double[]>(); 
-		for( double[] fitParameter : getFitParameterList() )
+		for( double[] position : getPositionArray() )
 		{
-			output.add( getNormalizedPosition(fitParameter, getInitPos() ) ); 
+			final double[] normPosition = new double[ normalPosition.length ]; 
+			for( int i = 0; i < normPosition.length; i++ )
+			{
+				normalPosition[ i ] = position[ i ] - normalPosition[ i ]; 
+			}
+			output.add( normalPosition ); 
 		}
 		
 		return output; 
+	}
+	
+	public double getMedianSD( final ArrayList<Double> in, final int windowSize )
+	{
+		DescriptiveStatistics ds = new DescriptiveStatistics(); 
+		ds.clear(); 
+		final ArrayList<Double> sdArray = getSDArray( getDistanceArray(), windowSize); 
+		for( Double d : sdArray )
+		{
+			ds.addValue( d ); 				
+		}
+		return ds.getPercentile( 50.0 ); 
 	}
 	
 	public ArrayList<Double> getSDArray( final ArrayList<Double> in, final int windowSize )
@@ -245,29 +213,24 @@ public class Particle implements Serializable
 		
 	}
 	
+	
 	public double[] getPositionFromFitParameters( final double[] fitParameter )
 	{
 		final double[] output = new double[ 2 ]; 
-		output[ 0 ] = fitParameter[ 1 ]; 
-		output[ 1 ] = fitParameter[ 2 ]; 
+		output[ 0 ] = fitParameter[ 0 ]; 
+		output[ 1 ] = fitParameter[ 1 ]; 
 		return output; 
 	}
 	
-	public double[] getNormalizedPosition( final double[] a, final double[] b )
-	{
-		final double[] output = new double[ a.length ]; 
-		for( int i = 0; i < a.length; i++ )
-			output[ i ] = a[ i ] - b[ i ]; 
-
-		return output; 
-	}
 	
 	public ArrayList<Double> getDistanceArray()
 	{
-		ArrayList<Double> output = new ArrayList<Double>(); 
-		for( double[] fitParameter : getFitParameterList() )
+		ArrayList<Double> output = new ArrayList<Double>();
+		final ArrayList<double[]> positionArray = getPositionArray();
+		final double[] initPos = getPositionArray().get( 0 ); 
+		for( double[] pos : positionArray )
 		{
-			output.add( getDistance( getPositionFromFitParameters( getInitPos() ), getPositionFromFitParameters( fitParameter ) ) ) ;
+			output.add( getDistance( pos, initPos ) ) ;
 		}
 		
 		return output; 
@@ -296,8 +259,54 @@ public class Particle implements Serializable
 	private void setInitPos( final double[] initPos ) { this.initPos = initPos; } 
 	public double[] getInitPos() { return this.initPos; } 
 	
-	private void setFitParameterList( final ArrayList<double[]> fitParameterList ) { this.fitParameterList = fitParameterList; } 
+	private void setFitParameterList( final ArrayList<double[]> fitParameterList ) { this.fitParameterList = fitParameterList; }
+	public void addFitParameter( final double[] fitParameter ) { this.fitParameterList.add( fitParameter ); } 
 	public ArrayList<double[]> getFitParameterList() { return this.fitParameterList; }
+	public double[] getLastPosition() 
+	{ 
+		double[] lastEntry; 
+		if( getFitParameterList().size() == 0 )
+			lastEntry = getInitPos(); 
+		else
+			lastEntry = getFitParameterList().get( getFitParameterList().size() - 1  ); 
+		
+		return getPositionFromFitParameters( lastEntry );
+	}
+	public Double getLastSigma()
+	{
+		double[] lastEntry; 
+		if( getFitParameterList().size() == 0 )
+			lastEntry = getInitPos(); 
+		else
+			lastEntry = getFitParameterList().get( getFitParameterList().size() - 1  ); 
+		
+		
+		return lastEntry[ 2 ]; 
+	}
+	public double[] getSecondLastPosition() 
+	{  
+		if( getFitParameterList().size() <= 1 )
+			return null; 
+		else
+			return getPositionFromFitParameters( getFitParameterList().get( getFitParameterList().size() - 2 ) );
+	}
+	public Double getSecondLastSigma()
+	{
+		if( getFitParameterList().size() <= 1 )
+			return null; 
+		else
+			return getFitParameterList().get( getFitParameterList().size() - 2 )[ 2 ];
+	}
+	public Double getDistanceBetweenLastTwoPos()
+	{
+		final double[] lastEntry = getLastPosition(); 
+		final double[] secLastEntry = getSecondLastPosition(); 
+		
+		if( secLastEntry == null )
+			return null; 
+		else
+			return getDistance( lastEntry, secLastEntry );  
+	}
 	
 	private void setTimeList( final ArrayList<Double> timelist ) { this.timeList = timelist; } 
 	public ArrayList<Double> getTimeList() { return this.timeList; } 
